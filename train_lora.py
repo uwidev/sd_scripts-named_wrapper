@@ -375,6 +375,12 @@ def main():
             datetime=datetime.now().strftime("%Y%m%d_%H%M%S"),
         )
 
+        # if we're continuing from a previous training, overwrite output_dir
+        # with our nested training session
+        new_config = re.sub(
+            "output_dir = .*", f'output_dir = "{output_dir}"', new_config
+        )
+
         # change output name, which was basename, to name
         new_config = re.sub(
             re.escape(f'output_name = "{basename}"'),
