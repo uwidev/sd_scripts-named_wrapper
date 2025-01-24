@@ -12,7 +12,7 @@ from enum import Enum
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("jobs_path", type=Path, help="location of training jobs to loop")
+parser.add_argument("jobs_path", type=Path, help="location of config and dataset toml")
 parser.add_argument(
     "-d",
     "--dry",
@@ -343,10 +343,10 @@ def main():
 
             if get_network_weights(config):
                 name = f"{continue_from_name}-NETWEIGHTS-{diff_name}"
+                output_dir = Path(continue_from).parent / f"NETWEIGHTS-{diff_name}"
             elif get_resume(config):
                 name = f"{continue_from_name}-RESUME-{diff_name}"
-
-            output_dir = Path(continue_from).parent / f"{name}"
+                output_dir = Path(continue_from).parent / f"RESUME-{diff_name}"
         else:
             output_dir = Path(
                 config[GROUPS.SAVE.value]["output_dir"].format(
