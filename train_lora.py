@@ -12,7 +12,7 @@ from enum import Enum
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("jobs_path", type=Path, help="location of config and dataset toml")
+parser.add_argument("jobs_path", type=Path, help="location of training jobs to loop")
 parser.add_argument(
     "-d",
     "--dry",
