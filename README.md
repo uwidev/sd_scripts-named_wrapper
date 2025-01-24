@@ -17,7 +17,7 @@ This reads from left to right as follows:
 - using network algorithm locon
 - with dim 32, alpha 16, convolution dim 16, convolution alpha 8
 - with debias estimation loss
-- using the v4 dataset
+- using the v4 dataset (the name of the folder containing the images)
 
 There are more elements to add to the name, like training resolution, but by default it assumes sdxl 1024, so it doesn't include that information. In other words, training parameters that are *default* are not included in the name.
 
