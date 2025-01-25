@@ -388,6 +388,7 @@ def main():
 
         # make sure output file does not already exist
         if output_file.exists():
+            failed_jobs.add(job)
             print(
                 f"the following output model already exists, skipping...\n{output_file}"
             )
