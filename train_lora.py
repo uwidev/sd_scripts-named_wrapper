@@ -5,7 +5,6 @@ from tomlkit import parse, TOMLDocument
 from pathlib import Path
 import subprocess
 import re
-import sys
 import shutil
 from datetime import datetime
 from enum import Enum
@@ -295,9 +294,40 @@ def diff_basket_names(b1: str, b2: str):
     return "-".join(b1_li)
 
 
+def natural_stem(p: Path) -> list:
+    """Chunk stem path by word-number for sorting.
+
+    Python sorts by lexicograph, which is no good for humans. The general idea
+    for this program is to watch a directory, and will choose the first time
+    sorted naturally.
+
+    This /works/ by chunking the stem into by string and number, put into a
+    list. Numbers are forced to be ints so it gets sorted by it's numerical
+    value rather than lexico, and string sorting works as expected.
+    """
+    s = p.stem
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", s)]
+
+
 def main():
-    jobs: Path = args.jobs_path
-    for job in jobs.iterdir():
+    jobs_path: Path = args.jobs_path
+    failed_jobs: set = set()
+
+    while True:
+        jobs = sorted(list(jobs_path.iterdir()), key=natural_stem)
+        job = None
+
+        while jobs:
+            _job = jobs.pop(0)
+            if _job in failed_jobs:
+                continue
+
+            job = _job
+            break
+
+        if job is None:
+            break
+
         config_file = job / "config.toml"
         dataset_file = job / "dataset.toml"
 
@@ -365,7 +395,7 @@ def main():
 
         # confirm name
         print(
-            f"training under the following name. make sure theses params are correct for this session:\n{name}"
+            f"training under the following name. make sure theses params are correct for this session:\n{name}\n"
         )
 
         # modify in-memory toml content from earlier read and do global sub
@@ -390,6 +420,12 @@ def main():
 
         new_dataset = dataset_file_content.format(basename=basename)
 
+        # start training
+        dry = args.dry
+        if dry:
+            failed_jobs.add(job)
+            continue
+
         # write to runtime store
         runtime = Path("./backend/runtime_store/")
         runtime.mkdir(exist_ok=True)
@@ -398,11 +434,6 @@ def main():
 
         with open(runtime / "dataset.toml", "w") as fp:
             fp.write(new_dataset)
-
-        # start training
-        dry = args.dry
-        if dry:
-            continue
 
         command = [
             "python",
@@ -419,6 +450,7 @@ def main():
                 archive_dir.mkdir(parents=True, exist_ok=True)
                 shutil.move(job, archive_dir / name)  # also renames it appropriately
         except Exception as e:
+            failed_jobs.add(job)
             print(e)
 
 
