@@ -52,10 +52,12 @@ def prepare_basket(config: TOMLDocument, dataset: TOMLDocument):
     add_basename(basket, config)
     add_model(basket, config)
     add_optimizer(basket, config)
+    add_scheduler(basket, config)
     add_ulr(basket, config)
     add_tlr(basket, config)
     add_batch(basket, config)
     add_epoch(basket, config)
+    add_step(basket, config)
     add_network(basket, config)
     add_resolution(basket, config)
     add_snr(basket, config)
@@ -128,6 +130,35 @@ def add_optimizer(basket: dict, config: TOMLDocument):
         basket["d"] = d_coef
 
 
+def add_scheduler(basket: dict, config: TOMLDocument):
+    sch_conf = config.get(GROUPS.LR.value)
+    sch_type: str | None = sch_conf.get("lr_scheduler_type")
+
+    if sch_type:
+        # TODO: all of torch built-in schedulers
+        sch_args = li_str_to_dict(sch_conf.get("lr_scheduler_args"))
+        if "rex" in sch_type.lower():
+            # TODO: figure out what to grab for cycles
+            basket["s"] = "rex"
+
+            sch_suffix = ""
+            if sch_args:
+                d = sch_args.get("d")
+                gamma = sch_args.get("gamma")
+                cycles = sch_conf.get("lr_scheduler_num_cycles")
+                sch_suffix += f"d{float(d) * 10:g}" if d and d != "0.9" else ""
+                sch_suffix += (
+                    f"g{float(gamma) * 10:g}" if gamma and gamma != "0.9" else ""
+                )
+                sch_suffix += f"c{cycles}" if cycles != 1 else ""
+
+            basket[sch_suffix] = ""
+    else:
+        sch = sch_conf.get("lr_scheduler")
+        if sch == "linear":
+            basket["s"] = "linear"
+
+
 def add_ulr(basket: dict, config: TOMLDocument):
     # unet lr
     optimizer = config.get(GROUPS.OPTIM.value)
@@ -155,7 +186,15 @@ def add_epoch(basket: dict, config: TOMLDocument):
     # epoch
     basics = config.get(GROUPS.BASICS.value)
     epoch = basics.get("max_train_epochs")
-    basket["e"] = str(epoch)
+    if epoch:
+        basket["e"] = str(epoch)
+
+
+def add_step(basket: dict, config: TOMLDocument):
+    basics = config.get(GROUPS.BASICS.value)
+    steps = basics.get("max_train_steps")
+    if steps and "e" not in basket:
+        basket["st"] = str(steps)
 
 
 def add_network(basket: dict, config: TOMLDocument):
@@ -184,34 +223,38 @@ def add_network(basket: dict, config: TOMLDocument):
 
             basket["a"] = algo
 
-            if network_args.get("factor"):
-                factor = network_args["factor"]
-            else:
-                factor = 0
+            algo_suffix = []
+            factor = network_args.get("factor")
+            algo_suffix.append(f"f{factor}" if factor else "")
+            algo_suffix.append("fm" if network_args.get("full_matrix") else "")
 
-            basket["f"] = str(factor)
+            basket["".join(algo_suffix)] = ""
 
         elif algo == "locon":
             if network_args.get("dora_wd"):
                 algo = "docon"
                 if network_args.get("wd_on_output"):
                     algo = "ddocon"
-
             basket["a"] = algo
 
     # dim/alpha
-    network = config.get(GROUPS.NET.value)
+    #
+    # dim/alpha are set by set by lokr factor, settings are irrelevant here
+    if algo not in ["lokr", "dokr"]:
+        network = config.get(GROUPS.NET.value)
 
-    dim = int(network.get("network_dim", 4))
-    alpha = int(network.get("network_alpha", 1))
+        dim = int(network.get("network_dim", 4))
+        alpha = int(network.get("network_alpha", 1))
 
-    if network_args:
-        cdim = int(network_args.get("conv_dim", 4))
-        calpha = int(network_args.get("conv_alpha", 1))
+        if network_args:
+            cdim = int(network_args.get("conv_dim", 4))
+            calpha = int(network_args.get("conv_alpha", 1))
 
-    basket[
-        f"d{dim}a{alpha}" if not network_args else f"d{dim}a{alpha}cd{cdim}ca{calpha}"
-    ] = ""
+        basket[
+            f"d{dim}a{alpha}"
+            if not network_args
+            else f"d{dim}a{alpha}cd{cdim}ca{calpha}"
+        ] = ""
 
     if network_args:
         if network_args.get("rs_lora"):
@@ -307,6 +350,27 @@ def natural_stem(p: Path) -> list:
     """
     s = p.stem
     return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", s)]
+
+
+def exists_handler(p: Path) -> Path:
+    """Return a renamed path if exists, otherwise return unchanged"""
+    if not p.exists():
+        return p
+
+    name = p.stem
+    ext = p.suffix
+
+    number = 1
+    if "_" in p.stem:
+        try:
+            name_split = name.split("_")
+            number = int(name_split[-1])
+            number += 1
+            name = "_".join(name_split[:-1])
+        except ValueError:
+            pass
+
+    return p.parent / f"{name}_{number}{ext}"
 
 
 def main():
@@ -445,10 +509,13 @@ def main():
             "./backend/runtime_store/config.toml",
         ]
         try:
-            result = subprocess.run(command, check=True)
-            if result:
+            proc = subprocess.run(["echo", "foobar"], check=True)
+            if proc.returncode == 0:
                 archive_dir = job.parent.parent / "archive" / basename
                 archive_dir.mkdir(parents=True, exist_ok=True)
+                dst = archive_dir / name
+                if dst.exists():
+                    shutil.move(dst, exists_handler(dst / "old"))
                 shutil.move(job, archive_dir / name)  # also renames it appropriately
         except Exception as e:
             failed_jobs.add(job)
