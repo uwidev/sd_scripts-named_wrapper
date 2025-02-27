@@ -117,18 +117,64 @@ def add_model(basket: dict, config: TOMLDocument):
 def add_optimizer(basket: dict, config: TOMLDocument):
 	# optimizer
 	optimizer = config.get(GROUPS.OPTIM.value)
-	optimizer_name = optimizer.get("optimizer_type")
+	optimizer_name:str = optimizer.get("optimizer_type").lower()
 
-	if "came" in optimizer_name.lower():
+	if "came" in optimizer_name:
 		basket["o"] = "CAME"
+		optimizer_args = li_str_to_dict(optimizer.get("optimizer_args"))
+		update = optimizer_args.get('update_strategy')
+		if update:
+			basket['uC'] = ''
 
-	elif "prodigy" in optimizer_name.lower():
+	elif "prodigy" in optimizer_name:
 		basket["o"] = "Prodigy"
 
 		optimizer_args = li_str_to_dict(optimizer.get("optimizer_args"))
 		d_coef = optimizer_args.get("d_coef") or "1"
 		basket["d"] = d_coef
 
+	elif "fmarscrop" in optimizer_name:
+		version = ''
+		machina = ''
+		mver = re.search(r'v\d', optimizer_name)
+		mmach = re.search(r'exmachina', optimizer_name)
+
+		args = ''
+
+		if mver:
+			version = f'{mver.group(0)}'
+
+		if mmach:
+			machina = f'xm'
+
+			optimizer_args = li_str_to_dict(optimizer.get("optimizer_args"))
+
+			update_strategy = optimizer_args.get('update_strategy')
+			args += '' if update_strategy in [None, 'cautious'] else update_strategy
+
+			if 'exmachina' in optimizer_name:
+				eps_floor = optimizer_args.get('eps_floor')  # dynamic eps
+				args += '' if eps_floor is None else f'epf{eps_floor}'
+
+				moment_centralization = optimizer_args.get('moment_centralization') # def 0.0
+				args += '' if not moment_centralization else f'mc{float(moment_centralization):g}'
+
+
+		basket["o"] = 'fmc' + version + machina + (f'-{args}' if args else '')
+	
+	elif "compass" in optimizer_name:
+		plus = ''
+		if re.search(r'Plus', optimizer_name):
+			plus = "p"
+
+		basket["o"] = 'comp' + plus
+	
+	elif "schedulefree" in optimizer_name:
+		sf_name = ''
+		if "radam" in optimizer_name:
+			sf_name = "radam"
+
+		basket['o'] = 'SF' + sf_name
 
 def add_scheduler(basket: dict, config: TOMLDocument):
 	sch_conf = config.get(GROUPS.LR.value)
@@ -146,17 +192,22 @@ def add_scheduler(basket: dict, config: TOMLDocument):
 				d = sch_args.get("d")
 				gamma = sch_args.get("gamma")
 				cycles = sch_conf.get("lr_scheduler_num_cycles")
+				warmup = sch_args.get("warmup_steps")
+				sch_suffix += f'w{float(warmup):g}' if warmup and float(warmup) != 0 else ''
 				sch_suffix += f"d{float(d) * 10:g}" if d and d != "0.9" else ""
 				sch_suffix += (
 					f"g{float(gamma) * 10:g}" if gamma and gamma != "0.9" else ""
 				)
 				sch_suffix += f"c{cycles}" if cycles != 1 else ""
 
-			basket[sch_suffix] = ""
+				if sch_suffix:
+					basket[sch_suffix] = ""
 	else:
 		sch = sch_conf.get("lr_scheduler")
 		if sch == "linear":
-			basket["s"] = "linear"
+			basket["s"] = "lin"
+		if sch == "constant":
+			basket["s"] = "cost"
 
 
 def add_ulr(basket: dict, config: TOMLDocument):
@@ -202,6 +253,7 @@ def add_network(basket: dict, config: TOMLDocument):
 	lyco = config.get(GROUPS.LYCO.value)
 	module = lyco.get("network_module")
 	network_args = lyco.get("network_args")
+
 	if network_args:
 		network_args = li_str_to_dict(network_args)
 
@@ -210,23 +262,26 @@ def add_network(basket: dict, config: TOMLDocument):
 		# I have been told there is little-to-no difference between training
 		# vs inference lbw. So we will not care about this anymore
 		# if parsed_network.get("down_lr_weight"):
-		#     weights = parsed_network["down_lr_weight"].split(",")
-		#     basket["wd"] = weights[0]
+		# weights = parsed_network["down_lr_weight"].split(",")
+		# basket["wd"] = weights[0]
 
 	elif "lycoris.kohya" == module:
 		algo = network_args.get("algo")
 		if algo == "lokr":
 			if network_args.get("dora_wd"):
-				algo = "dokr"
-				if network_args.get("wd_on_output"):
-					algo = "ddokr"
+				algo = "d" + algo[1:]
+
+			if network_args.get("wd_on_output"):
+				algo += "r"
 
 			basket["a"] = algo
 
-			algo_suffix = []
+			algo_suffix = ''
 			factor = network_args.get("factor")
-			algo_suffix.append(f"f{factor}" if factor else "")
-			algo_suffix.append("fm" if network_args.get("full_matrix") else "")
+			full_matrix = network_args.get('full_matrix')
+
+			algo_suffix += f"f{factor}" if factor else ""
+			algo_suffix += "fm" if full_matrix else ""
 
 			basket["".join(algo_suffix)] = ""
 
@@ -239,26 +294,24 @@ def add_network(basket: dict, config: TOMLDocument):
 
 	# dim/alpha
 	#
-	# dim/alpha are set by set by lokr factor, settings are irrelevant here
-	if algo not in ["lokr", "dokr"]:
-		network = config.get(GROUPS.NET.value)
+	# dim/alpha are set by set by lokr factor, settings are irrelevant here?
+	# if algo not in ["lokr", "dokr"]:
+	network = config.get(GROUPS.NET.value)
+	rank = ''
+	rs_lora = network_args.get("rs_lora")
 
-		dim = int(network.get("network_dim", 4))
-		alpha = int(network.get("network_alpha", 1))
-
-		if network_args:
-			cdim = int(network_args.get("conv_dim", 4))
-			calpha = int(network_args.get("conv_alpha", 1))
-
-		basket[
-			f"d{dim}a{alpha}"
-			if not network_args
-			else f"d{dim}a{alpha}cd{cdim}ca{calpha}"
-		] = ""
+	rank += f'd{network.get("network_dim", 4)}' if not full_matrix else ''
+	rank += f'a{network.get("network_alpha", 1)}'
 
 	if network_args:
-		if network_args.get("rs_lora"):
-			basket["rs"] = ""
+		rank += f'cd{network_args.get("conv_dim", 4)}' if not full_matrix else ''
+		rank += f'ca{network_args.get("conv_alpha", 1)}'
+
+		if rs_lora:
+			rank += 'rs'
+
+	basket[rank] = ""
+
 
 
 def add_snr(basket: dict, config: TOMLDocument):
