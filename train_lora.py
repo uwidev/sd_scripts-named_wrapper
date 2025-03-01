@@ -204,10 +204,18 @@ def add_scheduler(basket: dict, config: TOMLDocument):
 					basket[sch_suffix] = ""
 	else:
 		sch = sch_conf.get("lr_scheduler")
-		if sch == "linear":
+		if "linear" in sch:
 			basket["s"] = "lin"
-		if sch == "constant":
+		if "constant" in sch:
 			basket["s"] = "cost"
+
+		sch_suffix = ''
+		warmup = sch_conf.get('lr_warmup_steps')
+		if warmup:
+			sch_suffix += f'w{float(warmup):g}' if warmup and float(warmup) != 0 else ''
+
+		if sch_suffix:
+			basket[sch_suffix] = ""
 
 
 def add_ulr(basket: dict, config: TOMLDocument):
@@ -346,16 +354,27 @@ def add_resolution(basket: dict, config: TOMLDocument):
 
 def add_dataset(basket: dict, dataset: TOMLDocument):
 	dataset_general = dataset.get("general")
-	dataset_name = Path(dataset["datasets"][0]["subsets"][0]["image_dir"]).stem
+	datasets = dataset.get('datasets')
+	dataset_names: list[str] = []
+	for dataset in datasets:
+		subsets = dataset.get('subsets')
+		subset_names: list[str] = []
+		for subset in subsets:
+			dataset_name = Path(subset.get("image_dir")).stem
+			repeats = subset.get('num_repeats')
+			subset_names.append(f'{dataset_name}r{repeats}')
 
+		dataset_names.append('_'.join(subset_names))
+
+	datasets_subsets_joined = '-'.join(dataset_names)
+
+	res = ''
 	if dataset_general:
 		dataset_resolution = dataset_general.get("resolution")
 		if dataset_resolution != 1024:
-			ds = dataset_name + f"r{dataset_resolution}"
-		else:
-			ds = dataset_name
-
-	basket[ds] = ""
+			res = f"R{dataset_resolution}"
+	
+	basket[f"{f'-{res}' if res else ''}{datasets_subsets_joined}"] = ""
 
 
 def is_find_lr(config: TOMLDocument):
